@@ -1,11 +1,10 @@
 {
   "name": "vrlab-agent-server",
   "version": "1.0.0",
-  "description": "VR Lab Dashboard Cloud Server — bridges Unity headset agents to the web dashboard",
+  "description": "VR Lab Dashboard Server — bridges Unity headset agents to the web dashboard via WebSocket",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev":   "AGENT_SECRET=dev_secret_123 node server.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "ws": "^8.17.0"
