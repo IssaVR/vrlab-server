@@ -468,7 +468,7 @@ function sanitizeDevice(d) {
     id:           d.info.deviceId,
     name:         d.info.deviceName,
     sn:           d.info.serialNumber,
-    headset:      d.info.headsetModel,
+    headset:      d.info.headsetModel,  
     deviceId:     d.info.deviceId,
     deviceName:   d.info.deviceName,
     serialNumber: d.info.serialNumber,
