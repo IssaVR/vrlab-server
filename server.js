@@ -75,7 +75,8 @@ const httpServer = http.createServer((req, res) => {
   // CORS headers for the REST API
   res.setHeader('Access-Control-Allow-Origin',  CORS_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Filename');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Disposition');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
 
