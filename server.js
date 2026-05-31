@@ -75,36 +75,73 @@ const httpServer = http.createServer((req, res) => {
   // CORS headers for the REST API
   res.setHeader('Access-Control-Allow-Origin',  CORS_ORIGIN);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Filename');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Filename, X-Upload-Id, X-Chunk-Index, X-Total-Chunks');
   res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Disposition');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
 
-  // ── POST /api/upload — receive APK file from dashboard ──────────────────
-  if (pathname === '/api/upload' && req.method === 'POST') {
-    const rawName  = req.headers['x-filename'] || 'upload.apk';
-    const safeName = path.basename(rawName).replace(/[^a-zA-Z0-9._-]/g, '_');
-    const filename = `apk_${Date.now()}_${safeName}`;
-    const filepath = path.join(os.tmpdir(), filename);
-    const ws2      = fs.createWriteStream(filepath);
+  // ── POST /api/upload/chunk — chunked APK upload (avoids Railway timeout) ─
+  // Headers: X-Upload-Id, X-Chunk-Index, X-Total-Chunks, X-Filename
+  if (pathname === '/api/upload/chunk' && req.method === 'POST') {
+    const uploadId    = (req.headers['x-upload-id']    || '').replace(/[^a-zA-Z0-9_-]/g,'_');
+    const chunkIndex  = parseInt(req.headers['x-chunk-index']  || '0');
+    const totalChunks = parseInt(req.headers['x-total-chunks'] || '1');
+    const rawName     = req.headers['x-filename'] || 'upload.apk';
+    const safeName    = path.basename(rawName).replace(/[^a-zA-Z0-9._-]/g, '_');
 
-    let bytesReceived = 0;
-    req.on('data', chunk => { bytesReceived += chunk.length; });
-    req.pipe(ws2);
+    if (!uploadId) { res.writeHead(400); res.end('Missing X-Upload-Id'); return; }
 
-    ws2.on('finish', () => {
-      console.log(`[Upload] Saved ${filename} (${Math.round(bytesReceived/1024)}KB)`);
-      setTimeout(() => fs.unlink(filepath, () => {}), 2 * 60 * 60 * 1000);
+    const chunkPath = path.join(os.tmpdir(), `chunk_${uploadId}_${chunkIndex}`);
+    const cws = fs.createWriteStream(chunkPath);
+    req.pipe(cws);
 
-      const host     = req.headers['x-forwarded-host'] || req.headers['host'] || 'localhost';
-      const protocol = req.headers['x-forwarded-proto'] || 'https';
-      const downloadUrl = `${protocol}://${host}/api/download/${filename}`;
+    cws.on('finish', () => {
+      // Count how many chunks we have so far
+      let received = 0;
+      for (let i = 0; i < totalChunks; i++) {
+        if (fs.existsSync(path.join(os.tmpdir(), `chunk_${uploadId}_${i}`))) received++;
+      }
 
-      jsonResponse(res, { ok: true, url: downloadUrl, filename: safeName, size: bytesReceived });
+      if (received < totalChunks) {
+        jsonResponse(res, { ok: true, received, totalChunks, done: false });
+        return;
+      }
+
+      // All chunks here — assemble into final file
+      const finalName = `apk_${uploadId}_${safeName}`;
+      const finalPath = path.join(os.tmpdir(), finalName);
+      const out       = fs.createWriteStream(finalPath);
+
+      let i = 0;
+      function writeChunk() {
+        if (i >= totalChunks) { out.end(); return; }
+        const cp = path.join(os.tmpdir(), `chunk_${uploadId}_${i}`);
+        const data = fs.readFileSync(cp);
+        out.write(data);
+        try { fs.unlinkSync(cp); } catch {}
+        i++;
+        writeChunk();
+      }
+      writeChunk();
+
+      out.on('finish', () => {
+        const size = fs.statSync(finalPath).size;
+        console.log(`[Upload] Assembled ${finalName} (${Math.round(size/1024)}KB)`);
+        setTimeout(() => fs.unlink(finalPath, () => {}), 2 * 60 * 60 * 1000);
+
+        const host     = req.headers['x-forwarded-host'] || req.headers['host'] || 'localhost';
+        const protocol = req.headers['x-forwarded-proto'] || 'https';
+        const url      = `${protocol}://${host}/api/download/${finalName}`;
+        jsonResponse(res, { ok: true, done: true, url, filename: safeName, size });
+      });
+
+      out.on('error', (err) => { res.writeHead(500); res.end(`Assembly failed: ${err.message}`); });
     });
 
-    ws2.on('error', (err) => { console.error('[Upload] Error:', err.message); res.writeHead(500); res.end('Upload failed'); });
+    cws.on('error', (err) => { res.writeHead(500); res.end(`Chunk write failed: ${err.message}`); });
     return;
+  }
+
   }
 
   // ── GET /api/download/:filename — serve uploaded APK ─────────────────────
