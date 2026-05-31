@@ -142,8 +142,6 @@ const httpServer = http.createServer((req, res) => {
     return;
   }
 
-  }
-
   // ── GET /api/download/:filename — serve uploaded APK ─────────────────────
   const dlMatch = pathname.match(/^\/api\/download\/([a-zA-Z0-9._-]+)$/);
   if (dlMatch && req.method === 'GET') {
